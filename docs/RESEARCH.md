@@ -46,7 +46,10 @@ Auto-posting **your own products to your own accounts** is legitimate and common
 
 | Option | Cost | Automation friendliness |
 |---|---|---|
-| WooCommerce (self-hosted) | Software free; needs a host (Oracle Cloud Always-Free tier works, or ~€3/mo shared hosting) | Full REST API, free, no review |
+| Square Online | Free plan, 2.9% + 30¢ per transaction | Limited API; no self-hosting |
+| Big Cartel | Free up to 5 products | Very narrow; not automation-friendly |
+| Medusa / Saleor | Open-source, free | Self-host + you build everything; overkill for a beginner |
+| WooCommerce (self-hosted) | Software free; needs a host. Genuinely-free options are thin (most "free" hosts are trials); Oracle Cloud Always-Free VM works but is fiddly. Realistic: ~€3-5/mo shared hosting | Full REST API, free, no review |
 | Shopify | ~€1/mo promo months, then ~€36/mo | Excellent Admin API, native Printify app |
 | Etsy | €0.20/listing | Native Printify integration; API access is restricted |
 | eBay | Free-ish listings | Real official APIs (Sell/Browse/Trading), free dev keys |
@@ -57,6 +60,13 @@ The owner's email got banned likely due to signups/automation patterns on advers
 - **Resend** — 100 emails/day free, simple REST API.
 - **Brevo** — 300 emails/day free.
 - Both require domain verification (SPF/DKIM) for deliverability.
+
+## 5b. eBay as a marketplace alternative
+
+- eBay has **official free developer APIs** (Sell / Inventory / Browse / Trading) via the eBay Developers Program — free keys, generous call limits for a new seller. This is the only major marketplace here that legally supports the automation model.
+- Caveat: new accounts can face temporary API application restrictions; manual listing via **Seller Hub** (free forever) is the fallback while access is granted.
+- Selling fees apply per sale (~10-13% + payment processing). Not "free", but no fixed monthly cost at low volume.
+- Printify has a native eBay integration, so POD → eBay needs no custom fulfillment code.
 
 ## 6. Proposed architecture (POD route)
 
