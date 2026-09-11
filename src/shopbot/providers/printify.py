@@ -56,9 +56,15 @@ class PrintifyProvider(ProductProvider):
         return upload_id
 
     def create_product(self, product: Product, upload_id: str) -> Product:
-        blueprint = product.blueprint_id
+        try:
+            # Real Printify blueprint ids are numeric; tolerate "bp_123" style.
+            blueprint_id = int(str(product.blueprint_id).split("_")[-1])
+        except ValueError:
+            raise PermanentError(
+                f"blueprint_id must be numeric (use an id from list_blueprints()), "
+                f"got {product.blueprint_id!r}")
         payload = {
-            "blueprint_id": int(blueprint.split("_")[-1]) if "_" in str(blueprint) else int(blueprint),
+            "blueprint_id": blueprint_id,
             "print_provider_id": product.print_provider_id,
             "title": product.design.title,
             "description": product.design.description,
@@ -79,11 +85,16 @@ class PrintifyProvider(ProductProvider):
     def set_prices(self, product: Product, price_by_variant: dict[str, float]) -> None:
         if not product.printify_product_id:
             raise PermanentError("set_prices: product not created yet")
-        variants = [
-            {"id": int(vid), "price": int(round(price * 100)),
-             "is_enabled": True}
-            for vid, price in price_by_variant.items()
-        ]
+        try:
+            variants = [
+                {"id": int(vid), "price": int(round(price * 100)),
+                 "is_enabled": True}
+                for vid, price in price_by_variant.items()
+            ]
+        except ValueError:
+            raise PermanentError(
+                f"variant ids must be the numeric ids Printify returned in "
+                f"create_product, got {list(price_by_variant)!r}")
         api_request(self.session, "PUT",
                     self._shop(f"/products/{product.printify_product_id}.json"),
                     headers=self._headers, json={"variants": variants},

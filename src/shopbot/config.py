@@ -40,6 +40,7 @@ class Config:
     # Business parameters
     price_multiplier: float = 2.5   # retail = cost * multiplier (floor)
     min_margin: float = 8.0         # ...but never less than cost + min_margin (USD)
+    pricing_currency: str = "USD"   # alerts if a storefront order arrives in another
 
     @classmethod
     def from_env(cls) -> "Config":

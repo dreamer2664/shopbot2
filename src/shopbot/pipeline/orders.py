@@ -36,6 +36,13 @@ def validate_order(order: Order) -> str | None:
         return "no line items"
     if any(ln.quantity <= 0 for ln in order.lines):
         return "non-positive quantity"
+    for i, ln in enumerate(order.lines):
+        # Empty ids mean the webhook referenced a deleted/custom line item —
+        # Printify cannot fulfill it, so reject here with a clear reason.
+        if not (ln.product_id or "").strip():
+            return f"line {i}: missing product_id"
+        if not (ln.variant_id or "").strip():
+            return f"line {i}: missing variant_id"
     a = order.ship_to
     for name, value in [("country", a.country), ("zip", a.zip),
                         ("address1", a.address1), ("city", a.city)]:
@@ -53,12 +60,25 @@ def handle_order(
     notifier: Notifier | None = None,
     sleep: Callable[[float], None] = lambda _s: None,
     attempts: int = 3,
+    expected_currency: str | None = None,
 ) -> FulfillmentResult:
     """Fulfill a single order with retries, idempotency and owner alerts.
 
     Idempotency: the fulfiller keys on order.order_id, so replaying the same
     webhook twice (which platforms do routinely) can never double-print.
+
+    expected_currency: prices are computed in one currency (default USD via
+    Printify costs). If an order arrives in another currency we still fulfill
+    (the customer already paid) but alert the owner — silent FX drift eats
+    margins without ever raising an error.
     """
+    if (expected_currency and notifier
+            and order.currency
+            and order.currency.upper() != expected_currency.upper()):
+        notifier.notify_owner(
+            f"[order {order.order_id}] currency mismatch: charged "
+            f"{order.currency} but pricing assumes {expected_currency}. "
+            f"Check store currency settings / margins.")
     error = validate_order(order)
     if error:
         if notifier:
@@ -95,6 +115,7 @@ def process_orders(
     notifier: Notifier | None = None,
     since=None,
     sleep: Callable[[float], None] = lambda _s: None,
+    expected_currency: str | None = None,
 ) -> OrderBatchResult:
     """Poll the storefront for new orders and fulfill each one.
 
@@ -107,5 +128,5 @@ def process_orders(
     for order in store.fetch_orders_since(since):
         batch.results.append(
             handle_order(order, fulfiller=fulfiller, notifier=notifier,
-                         sleep=sleep))
+                         sleep=sleep, expected_currency=expected_currency))
     return batch

@@ -25,18 +25,23 @@ A pipeline that automates a real online store end-to-end:
 - [x] Core pipeline: pricing, product launch, order fulfillment — mock providers
 - [x] Live providers: Printify, Shopify, Telegram, Resend, Postiz
 - [x] Webhook receiver: Shopify `orders/create` with HMAC verification
-- [x] Test suite: 46 tests, all offline (`python -m pytest`)
+- [x] Durability: append-only ledger, poll checkpoint (crash-safe)
+- [x] Chaos training: 1000 randomized business days, 6 global invariants, 0 violations
+- [x] Test suite: 187 tests, all offline (`python -m pytest`)
 - [ ] Credentials in `.env` + live smoke test on a real Shopify dev store
 - [ ] Design assets (your own artwork) + first product launch
 
-## Try it now
+## Commands
 
 ```bash
 pip install -r requirements.txt
-python -m pytest                             # 46 tests, no network
-PYTHONPATH=src python -m shopbot.cli demo    # full business loop, mock providers
-PYTHONPATH=src python -m shopbot.cli config  # show live/dry-run mode
-PYTHONPATH=src python -m shopbot.webhook     # webhook receiver (dry run without creds)
+python -m pytest                                # 187 tests, no network
+PYTHONPATH=src python -m shopbot.cli demo       # simulated business day (mocks)
+PYTHONPATH=src python -m shopbot.cli config     # live/dry-run + which creds present
+PYTHONPATH=src python -m shopbot.cli launch designs.example.csv
+PYTHONPATH=src python -m shopbot.cli poll       # one-shot order processing (cron-friendly)
+PYTHONPATH=src python -m shopbot.cli report     # revenue/order summary from ledger
+PYTHONPATH=src python -m shopbot.cli serve      # webhook receiver
 ```
 
 Safety guarantee: `Config.from_env()` stays in **dry run** unless BOTH
@@ -55,11 +60,15 @@ secret copied into `SHOPIFY_WEBHOOK_SECRET`).
 |---|---|
 | Pricing | .99 rounding, multiplier vs margin floor, never prices below cost+margin |
 | Product launch | Correct step ordering; socials never fire if listing failed; retries absorb transient outages; nothing half-published when retries exhaust |
-| Orders | Address/quantity validation; **duplicate webhook replay never double-prints**; transient retry then success; persistent outage escalates to owner; permanent rejection is not retried |
-| Printify provider | Payload shapes; **cents↔dollars and int↔str id normalisation**; HTTP status → Transient/Permanent mapping; network errors retryable |
+| Orders | Address/quantity/**line-item id** validation; **duplicate webhook replay never double-prints**; transient retry then success; persistent outage escalates to owner; permanent rejection not retried; **currency mismatch alerts owner** |
+| Printify provider | Payload shapes; cents↔dollars and int↔str id normalisation; **bad ids → PermanentError, never raw crashes**; HTTP status → error-class mapping |
 | Shopify parsing | Order/webhook payload mapping; country normalisation; missing address rejected |
-| Webhook server | Real local HTTP server: **HMAC accept/reject**, happy path, replay → duplicate, unfixable payload → 200 + owner alert (stops Shopify retry storms), healthcheck |
+| Webhook server | Real local HTTP server: HMAC accept/reject, replay → duplicate, unfixable payload → 200 + alert, healthcheck |
 | Factory/config | Dry-run default; partial creds stay dry-run; full creds go live; bad domain rejected |
+| Ledger | Crash-safe JSONL: torn last line skipped; dedupe ids; daily revenue summary; unicode-safe |
+| Checkpoint | Roundtrip; corrupt file → safe fallback; atomic overwrite |
+| **Chaos (x120 seeds)** | Randomized business days with injected outages/rejections/replays. Invariants: no double-print, invalid orders never fulfilled, no ghost social posts, no unpublished listings, ledger == fulfiller truth, failures never crash |
+| Regressions | Every bug found by adversarial probing gets a permanent named test (`test_regressions.py`) |
 
 ## Structure
 
