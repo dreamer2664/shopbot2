@@ -26,7 +26,7 @@ API_VERSION = "2025-01"
 PRODUCT_SET_MUTATION = """
 mutation productSet($input: ProductSetInput!) {
   productSet(synchronous: true, input: $input) {
-    product { id title status }
+    product { id title status variants(first: 100) { nodes { id } } }
     userErrors { field message }
   }
 }
@@ -61,17 +61,19 @@ class ShopifyStorefront(Storefront):
     domain: str          # mystore.myshopify.com
     token: str
     session: object = field(default=None)
+    base_url: str = ""   # override for the integration simulator; "" = derive from domain
 
     def __post_init__(self):
         if self.session is None:
             import requests
             self.session = requests.Session()
-        if not self.domain.endswith("myshopify.com"):
+        if not self.base_url and not self.domain.endswith("myshopify.com"):
             raise PermanentError(f"bad Shopify domain: {self.domain!r}")
 
     @property
     def _endpoint(self) -> str:
-        return f"https://{self.domain}/admin/api/{API_VERSION}/graphql.json"
+        base = self.base_url or f"https://{self.domain}"
+        return f"{base.rstrip('/')}/admin/api/{API_VERSION}/graphql.json"
 
     @property
     def _headers(self) -> dict:
@@ -153,6 +155,10 @@ class ShopifyStorefront(Storefront):
             raise PermanentError(
                 f"shopify.productSet: no product id in {str(result)[:200]}")
         product.store_product_id = _gid_id(node["id"])
+        # Capture store variant ids (same order as our variants list) so the
+        # catalog can translate incoming store orders to supplier ids.
+        nodes = ((node.get("variants") or {}).get("nodes") or [])
+        product.store_variant_ids = [_gid_id(n.get("id")) for n in nodes]
         return product.store_product_id
 
     def fetch_orders_since(self, since: datetime) -> list[Order]:

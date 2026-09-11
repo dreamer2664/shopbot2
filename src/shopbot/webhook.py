@@ -41,6 +41,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
     providers: Providers        # injected by serve()
     webhook_secret: str = ""    # empty = skip HMAC (dev only, warn loudly)
     alerts_seen: set = set()    # dedupe recurring advisories across requests
+    catalog = None              # pipeline.catalog.Catalog for id translation
+    ledger = None               # pipeline.ledger.Ledger for crash-safe history
 
     def do_POST(self):  # noqa: N802
         if self.path.rstrip("/") not in ("/webhooks/orders_create", ""):
@@ -80,10 +82,44 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._respond(200, {"status": "rejected", "reason": str(exc)})
             return
 
+        # Translate STORE ids -> SUPPLIER ids before anything else: Shopify
+        # orders reference Shopify product/variant ids, which Printify rejects.
+        cost = None
+        if self.catalog is not None:
+            from .pipeline.catalog import UnmappedOrderError
+            try:
+                order, cost = self.catalog.translate(order)
+            except UnmappedOrderError as exc:
+                log.warning("unmapped order %s: %s", order.order_id, exc)
+                if self.providers.notifier:
+                    self.providers.notifier.notify_owner(
+                        f"[order {order.order_id}] NOT fulfilled: {exc}")
+                if self.ledger:
+                    from .providers.base import FulfillmentResult
+                    self.ledger.record_fulfillment(
+                        FulfillmentResult(order.order_id, "failed",
+                                          error=f"unmapped: {exc}"), order)
+                # 200: retrying an unmapped order will never fix itself
+                self._respond(200, {"status": "rejected", "reason": str(exc)})
+                return
+
+        from .control import paused
+        if paused():
+            # Owner pressed /pause: acknowledge (so Shopify stops retrying)
+            # but leave the order unfulfilled — /resume catches up via poll.
+            log.info("paused: order %s recorded but NOT fulfilled",
+                     order.order_id)
+            self._respond(200, {"status": "held_paused",
+                                "order_id": order.order_id})
+            return
+
         result = handle_order(order, fulfiller=self.providers.fulfiller,
                               notifier=self.providers.notifier,
                               sleep=self.providers.sleep,
                               alerts_seen=self.alerts_seen)
+        result.cost = cost
+        if self.ledger:
+            self.ledger.record_fulfillment(result, order, cost=cost)
         status = 200 if result.status in ("sent", "duplicate") else 500
         self._respond(status, {"status": result.status,
                                "provider_order_id": result.provider_order_id,
@@ -113,8 +149,12 @@ def serve(host: str = "0.0.0.0", port: int = 8787,
     cfg = cfg or Config.from_env()
     providers = build_providers(cfg)
     import os
+    from .pipeline.catalog import Catalog
+    from .pipeline.ledger import Ledger
     WebhookHandler.providers = providers
     WebhookHandler.webhook_secret = os.environ.get("SHOPIFY_WEBHOOK_SECRET", "")
+    WebhookHandler.catalog = Catalog("data/catalog.json")
+    WebhookHandler.ledger = Ledger("data/ledger.jsonl")
     mode = "DRY RUN (mock fulfillment)" if cfg.dry_run else "LIVE"
     log.info("shopbot webhook receiver starting on %s:%s — %s", host, port, mode)
     ThreadingHTTPServer((host, port), WebhookHandler).serve_forever()

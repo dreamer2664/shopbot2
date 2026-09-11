@@ -46,6 +46,7 @@ def launch_product(
     social_networks: list[str] | None = None,
     category: str = "tshirt",
     use_v2_pricing: bool = True,
+    catalog=None,
 ) -> ProductLaunchResult:
     """Run one design through the full launch flow.
 
@@ -93,6 +94,11 @@ def launch_product(
 
         store.upsert_product(product)
         result.steps_done.append("upsert_store")
+
+        if catalog is not None:
+            # persist BOTH id spaces now — the only moment we know them
+            catalog.record(product, prices)
+            result.steps_done.append("catalog")
 
         if social is not None:
             text, images = build_social_copy(product)

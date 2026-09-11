@@ -72,6 +72,9 @@ def server():
                           social=mocks.social, sleep=mocks.sleep)
     WebhookHandler.providers = providers
     WebhookHandler.webhook_secret = SECRET
+    WebhookHandler.catalog = None   # reset class state from other test modules
+    WebhookHandler.ledger = None
+    WebhookHandler.alerts_seen = set()
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), WebhookHandler)
     port = httpd.server_address[1]
     t = threading.Thread(target=httpd.serve_forever, daemon=True)

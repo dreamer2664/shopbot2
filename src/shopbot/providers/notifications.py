@@ -19,6 +19,8 @@ class TelegramNotifier(Notifier):
     resend_key: str = ""
     email_from: str = ""
     session: object = field(default=None)
+    base_url: str = ""         # override for simulator; "" = https://api.telegram.org
+    resend_base_url: str = ""  # override for simulator; "" = https://api.resend.com
 
     def __post_init__(self):
         if self.session is None:
@@ -26,15 +28,17 @@ class TelegramNotifier(Notifier):
             self.session = requests.Session()
 
     def notify_owner(self, message: str) -> None:
+        base = self.base_url or "https://api.telegram.org"
         api_request(self.session, "POST",
-                    f"https://api.telegram.org/bot{self.token}/sendMessage",
+                    f"{base.rstrip('/')}/bot{self.token}/sendMessage",
                     json={"chat_id": self.chat_id, "text": message},
                     label="telegram.sendMessage")
 
     def email_customer(self, to: str, subject: str, body: str) -> None:
         if not self.resend_key:
             return  # email optional; Printify/Shopify already send confirmations
-        api_request(self.session, "POST", "https://api.resend.com/emails",
+        base = self.resend_base_url or "https://api.resend.com"
+        api_request(self.session, "POST", f"{base.rstrip('/')}/emails",
                     headers={"Authorization": f"Bearer {self.resend_key}",
                              "Content-Type": "application/json"},
                     json={"from": self.email_from, "to": [to],

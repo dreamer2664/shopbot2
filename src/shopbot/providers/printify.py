@@ -14,7 +14,7 @@ from .base import (
 )
 from .http import api_request
 
-BASE = "https://api.printify.com/v1"
+PROD_BASE = "https://api.printify.com"
 
 
 @dataclass
@@ -22,6 +22,7 @@ class PrintifyProvider(ProductProvider):
     token: str
     shop_id: str
     session: object = field(default=None)  # injectable for tests
+    base_url: str = ""  # override for the integration simulator; "" = production
 
     def __post_init__(self):
         if self.session is None:
@@ -29,17 +30,21 @@ class PrintifyProvider(ProductProvider):
             self.session = requests.Session()
 
     @property
+    def _root(self) -> str:
+        return f"{(self.base_url or PROD_BASE).rstrip('/')}/v1"
+
+    @property
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.token}",
                 "Content-Type": "application/json"}
 
     def _shop(self, path: str) -> str:
-        return f"{BASE}/shops/{self.shop_id}{path}"
+        return f"{self._root}/shops/{self.shop_id}{path}"
 
     # ---- ProductProvider -------------------------------------------------
 
     def list_blueprints(self) -> list[dict]:
-        data = api_request(self.session, "GET", f"{BASE}/catalog/blueprints.json",
+        data = api_request(self.session, "GET", f"{self._root}/catalog/blueprints.json",
                            headers=self._headers, label="printify.blueprints")
         return data if isinstance(data, list) else []
 

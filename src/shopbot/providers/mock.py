@@ -94,6 +94,9 @@ class MockStorefront(Storefront):
         self.calls.append(f"upsert_product:{product.design.slug}")
         self._n += 1
         product.store_product_id = f"shop_{self._n}"
+        # In the mock world store ids and supplier ids are the same thing, so
+        # catalog translation becomes an identity map — dry-run `poll` works.
+        product.store_variant_ids = [v.variant_id for v in product.variants]
         self.listings[product.store_product_id] = product
         return product.store_product_id
 

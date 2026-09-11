@@ -133,19 +133,38 @@ def process_orders(
     expected_currency: str | None = None,
     alerts_seen: set | None = None,
     notify_on_sent: bool = False,
+    catalog=None,
 ) -> OrderBatchResult:
     """Poll the storefront for new orders and fulfill each one.
 
     In production this is the fallback path; the primary path is a webhook
     (orders/create) hitting the receiver, which calls handle_order directly.
     Pass a long-lived `alerts_seen` set to dedupe advisories across batches.
+
+    catalog: pipeline.catalog.Catalog — translates STORE product/variant ids
+    from the order into SUPPLIER ids before fulfillment. Unmapped orders are
+    rejected with an owner alert instead of failing cryptically at Printify.
     """
     from datetime import datetime, timezone
     since = since or datetime(2000, 1, 1, tzinfo=timezone.utc)
     batch = OrderBatchResult()
     for order in store.fetch_orders_since(since):
-        batch.results.append(
-            handle_order(order, fulfiller=fulfiller, notifier=notifier,
-                         sleep=sleep, expected_currency=expected_currency,
-                         alerts_seen=alerts_seen))
+        cost = None
+        if catalog is not None:
+            from .catalog import UnmappedOrderError
+            try:
+                order, cost = catalog.translate(order)
+            except UnmappedOrderError as exc:
+                if notifier:
+                    notifier.notify_owner(
+                        f"[order {order.order_id}] NOT fulfilled: {exc}")
+                batch.results.append(FulfillmentResult(
+                    order.order_id, "failed", error=f"unmapped: {exc}"))
+                continue
+        result = handle_order(order, fulfiller=fulfiller, notifier=notifier,
+                              sleep=sleep, expected_currency=expected_currency,
+                              alerts_seen=alerts_seen,
+                              notify_on_sent=notify_on_sent)
+        result.cost = cost
+        batch.results.append(result)
     return batch

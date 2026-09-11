@@ -15,6 +15,7 @@ import csv
 import sys
 
 from .config import Config
+from .pipeline.catalog import Catalog
 from .pipeline.ledger import Ledger
 from .pipeline.orders import process_orders
 from .pipeline.products import launch_product
@@ -26,6 +27,10 @@ from .providers.mock import MockProviders, sample_design
 
 def _ledger() -> Ledger:
     return Ledger("data/ledger.jsonl")
+
+
+def _catalog() -> Catalog:
+    return Catalog("data/catalog.json")
 
 
 def demo() -> int:
@@ -106,7 +111,7 @@ def launch_csv(path: str) -> int:
     """Launch every design in a CSV. Works in dry-run (mocks) and live."""
     cfg = Config.from_env()
     providers = build_providers(cfg)
-    ledger = _ledger()
+    ledger, catalog = _ledger(), _catalog()
     mode = "DRY RUN" if cfg.dry_run else "LIVE"
     print(f"== launching from {path} ({mode}) ==")
     failures = 0
@@ -123,7 +128,7 @@ def launch_csv(path: str) -> int:
                                  supplier=providers.supplier,
                                  store=providers.store,
                                  social=providers.social, cfg=cfg,
-                                 sleep=providers.sleep)
+                                 sleep=providers.sleep, catalog=catalog)
             ledger.record_launch(design.slug, res.success,
                                  detail={"steps": res.steps_done,
                                          "price": res.product.retail_price
@@ -143,14 +148,15 @@ def poll() -> int:
     """One-shot order processing with checkpoint + ledger (cron-friendly)."""
     cfg = Config.from_env()
     providers = build_providers(cfg)
-    ledger, cp = _ledger(), Checkpoint()
+    ledger, cp, catalog = _ledger(), Checkpoint(), _catalog()
     since = cp.load_last_run()
     batch = process_orders(store=providers.store, fulfiller=providers.fulfiller,
                            notifier=providers.notifier, since=since,
                            sleep=providers.sleep,
-                           expected_currency=cfg.pricing_currency)
+                           expected_currency=cfg.pricing_currency,
+                           catalog=catalog)
     for r in batch.results:
-        ledger.record_fulfillment(r)
+        ledger.record_fulfillment(r, cost=r.cost)
     cp.save_last_run()
     print(f"polled since {since.isoformat()}: sent={batch.sent} "
           f"duplicates={batch.duplicates} failed={batch.failed}")
@@ -176,6 +182,50 @@ def serve() -> int:
     return 0
 
 
+def run() -> int:
+    """All-in-one production process: webhook receiver + Telegram control bot.
+
+    The control bot long-polls Telegram (outbound connections only), so the
+    whole program is reachable from your phone with no extra infrastructure.
+    """
+    import logging
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from .control import ControlBot
+    from .pipeline.catalog import Catalog
+    from .pipeline.ledger import Ledger
+    from .webhook import WebhookHandler
+
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    cfg = Config.from_env()
+    providers = build_providers(cfg)
+
+    import os
+    WebhookHandler.providers = providers
+    WebhookHandler.webhook_secret = os.environ.get("SHOPIFY_WEBHOOK_SECRET", "")
+    WebhookHandler.catalog = Catalog("data/catalog.json")
+    WebhookHandler.ledger = Ledger("data/ledger.jsonl")
+    httpd = ThreadingHTTPServer(("0.0.0.0", 8787), WebhookHandler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    print(f"webhook receiver on :8787 ({'DRY RUN' if cfg.dry_run else 'LIVE'})")
+
+    if cfg.telegram_token and cfg.telegram_chat_id:
+        bot = ControlBot(cfg=cfg, providers=providers,
+                         ledger=Ledger("data/ledger.jsonl"))
+        print("telegram control bot online — send /help to your bot")
+        bot.run_forever()          # blocks; Ctrl-C to stop
+    else:
+        print("TELEGRAM_BOT_TOKEN/CHAT_ID missing — no control interface; "
+              "webhook only. Ctrl-C to stop.")
+        try:
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            pass
+    return 0
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "demo"
     if cmd == "demo":
@@ -190,6 +240,8 @@ def main(argv: list[str]) -> int:
         return report(argv[2] if len(argv) > 2 else None)
     if cmd == "serve":
         return serve()
+    if cmd == "run":
+        return run()
     print(__doc__)
     return 2
 

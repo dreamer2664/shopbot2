@@ -50,6 +50,7 @@ class Product:
     variants: list[Variant] = field(default_factory=list)
     printify_product_id: str | None = None
     store_product_id: str | None = None
+    store_variant_ids: list[str] = field(default_factory=list)  # aligned with variants
     retail_price: float | None = None
     published: bool = False
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -115,6 +116,7 @@ class FulfillmentResult:
     provider_order_id: str | None = None
     error: str | None = None
     attempts: int = 1
+    cost: float | None = None      # supplier cost (from catalog), for analytics
 
 
 class ProductProvider(ABC):
