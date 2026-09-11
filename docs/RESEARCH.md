@@ -50,7 +50,7 @@ Auto-posting **your own products to your own accounts** is legitimate and common
 | Big Cartel | Free up to 5 products | Very narrow; not automation-friendly |
 | Medusa / Saleor | Open-source, free | Self-host + you build everything; overkill for a beginner |
 | WooCommerce (self-hosted) | Software free; needs a host. Genuinely-free options are thin (most "free" hosts are trials); Oracle Cloud Always-Free VM works but is fiddly. Realistic: ~€3-5/mo shared hosting | Full REST API, free, no review |
-| Shopify | ~€1/mo promo months, then ~€36/mo | Excellent Admin API, native Printify app |
+| Shopify | 3-day free trial (no credit card), then $1/mo for 3 months (~$3 total), then Basic at $39/mo ($29/mo billed annually) | Excellent Admin API, native Printify app, zero server maintenance |
 | Etsy | €0.20/listing | Native Printify integration; API access is restricted |
 | eBay | Free-ish listings | Real official APIs (Sell/Browse/Trading), free dev keys |
 
