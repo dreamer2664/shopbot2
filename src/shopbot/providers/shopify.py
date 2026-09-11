@@ -84,9 +84,10 @@ class ShopifyStorefront(Storefront):
                            json={"query": query, "variables": variables},
                            label=label)
         if not isinstance(data, dict):
-            raise PermanentError(f"{label}: unexpected response {data!r:.200}")
+            raise PermanentError(f"{label}: unexpected response {str(data)[:200]}")
         if data.get("errors"):
-            raise PermanentError(f"{label}: graphql errors {data['errors']!r:.300}")
+            raise PermanentError(
+                f"{label}: graphql errors {str(data['errors'])[:300]}")
         return data.get("data") or {}
 
     # ---- Storefront -------------------------------------------------------
@@ -145,10 +146,12 @@ class ShopifyStorefront(Storefront):
         result = data.get("productSet") or {}
         user_errors = result.get("userErrors") or []
         if user_errors:
-            raise PermanentError(f"shopify.productSet userErrors: {user_errors!r:.300}")
+            raise PermanentError(
+                f"shopify.productSet userErrors: {str(user_errors)[:300]}")
         node = result.get("product") or {}
         if not node.get("id"):
-            raise PermanentError(f"shopify.productSet: no product id {result!r:.200}")
+            raise PermanentError(
+                f"shopify.productSet: no product id in {str(result)[:200]}")
         product.store_product_id = _gid_id(node["id"])
         return product.store_product_id
 

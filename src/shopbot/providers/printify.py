@@ -76,7 +76,8 @@ class PrintifyProvider(ProductProvider):
                            headers=self._headers, json=payload,
                            label="printify.create_product")
         if not isinstance(data, dict) or "id" not in data:
-            raise PermanentError(f"printify.create_product: bad response {data!r:.200}")
+            raise PermanentError(
+                f"printify.create_product: bad response {str(data)[:200]}")
         product.printify_product_id = str(data["id"])
         if data.get("variants"):
             product.variants = [_to_variant(v) for v in data["variants"]]
@@ -128,7 +129,8 @@ class PrintifyProvider(ProductProvider):
                            headers=self._headers, json=payload,
                            label="printify.submit_order")
         if not isinstance(data, dict) or "id" not in data:
-            raise PermanentError(f"printify.submit_order: bad response {data!r:.200}")
+            raise PermanentError(
+                f"printify.submit_order: bad response {str(data)[:200]}")
         return FulfillmentResult(order.order_id, "sent", str(data["id"]))
 
 
