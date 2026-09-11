@@ -27,7 +27,10 @@ A pipeline that automates a real online store end-to-end:
 - [x] Webhook receiver: Shopify `orders/create` with HMAC verification
 - [x] Durability: append-only ledger, poll checkpoint (crash-safe)
 - [x] Chaos training: 1000 randomized business days, 6 global invariants, 0 violations
-- [x] Test suite: 187 tests, all offline (`python -m pytest`)
+- [x] Business knowledge base: cited market benchmarks + rule-based SEO copywriting
+- [x] Market simulator + year-long training run (pricing playbook + ops rehearsal)
+- [x] Analytics: ledger → business report → benchmark-based alerts
+- [x] Test suite: 244 tests, all offline (`python -m pytest`)
 - [ ] Credentials in `.env` + live smoke test on a real Shopify dev store
 - [ ] Design assets (your own artwork) + first product launch
 
@@ -68,7 +71,14 @@ secret copied into `SHOPIFY_WEBHOOK_SECRET`).
 | Ledger | Crash-safe JSONL: torn last line skipped; dedupe ids; daily revenue summary; unicode-safe |
 | Checkpoint | Roundtrip; corrupt file → safe fallback; atomic overwrite |
 | **Chaos (x120 seeds)** | Randomized business days with injected outages/rejections/replays. Invariants: no double-print, invalid orders never fulfilled, no ghost social posts, no unpublished listings, ledger == fulfiller truth, failures never crash |
-| Regressions | Every bug found by adversarial probing gets a permanent named test (`test_regressions.py`) |
+| Shopify GraphQL | productSet payload shape, gid→id parsing, userErrors/graphql errors → PermanentError, DRAFT vs ACTIVE, duplicate option values, order query mapping, bad-domain rejection |
+| Simulator | Determinism per seed, demand falls as price rises, seasonality, Poisson mean ≈ λ, accounting identity, optimal price beats naive heuristic, cost shift moves optimum |
+| Knowledge/copy | Every generated title/meta/alt passes the cited SEO checklist; keyword front-loaded; caps respected |
+| Pricing v2 | Fee-aware formula inverts exactly, impossible targets rejected, market-floor snap, margin clamped to survival band |
+| Analytics | Aggregation, margin-floor / failure-rate / per-product reprice alerts, empty ledger |
+| Training run | Stage 1 covers all categories profitably; stage 2 end-to-end invariants; playbook prices within sane market bands |
+| **End-to-end** | CSV → launch → v2 pricing clears margin floor → 15 orders + replay + invalid → analytics bestseller correct → CLI report |
+| Regressions | Every bug found by adversarial probing or training gets a permanent named test (`test_regressions.py`, `test_regression_order_fieldslip.py`) |
 
 ## Structure
 
