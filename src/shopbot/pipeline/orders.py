@@ -61,6 +61,8 @@ def handle_order(
     sleep: Callable[[float], None] = lambda _s: None,
     attempts: int = 3,
     expected_currency: str | None = None,
+    alerts_seen: set | None = None,
+    notify_on_sent: bool = False,
 ) -> FulfillmentResult:
     """Fulfill a single order with retries, idempotency and owner alerts.
 
@@ -71,14 +73,24 @@ def handle_order(
     Printify costs). If an order arrives in another currency we still fulfill
     (the customer already paid) but alert the owner — silent FX drift eats
     margins without ever raising an error.
+
+    alerts_seen: dedupe set for *recurring* advisories (currency mismatch).
+    Lesson from the year-long training run: alerting per-order produced 20k
+    notifications and total alert fatigue. Systemic issues alert once per key;
+    per-order failures (which need action) always alert.
     """
     if (expected_currency and notifier
             and order.currency
             and order.currency.upper() != expected_currency.upper()):
-        notifier.notify_owner(
-            f"[order {order.order_id}] currency mismatch: charged "
-            f"{order.currency} but pricing assumes {expected_currency}. "
-            f"Check store currency settings / margins.")
+        key = f"currency:{order.currency.upper()}:{expected_currency.upper()}"
+        if alerts_seen is None or key not in alerts_seen:
+            if alerts_seen is not None:
+                alerts_seen.add(key)
+            notifier.notify_owner(
+                f"[pricing] orders are arriving in {order.currency} but pricing "
+                f"assumes {expected_currency} (e.g. order {order.order_id}). "
+                f"Check store currency settings / margins. "
+                f"(You'll only be told once per currency pair.)")
     error = validate_order(order)
     if error:
         if notifier:
@@ -101,7 +113,10 @@ def handle_order(
                 f"[order {order.order_id}] rejected by supplier: {exc}")
         return FulfillmentResult(order.order_id, "failed", error=str(exc))
 
-    if notifier and result.status == "sent":
+    # Notification policy (lesson from the training year: 10k sales = 10k
+    # pings = muted chat = missed real emergencies). Sales are summarized by
+    # the daily `report`; only problems page the owner in real time.
+    if notifier and result.status == "sent" and notify_on_sent:
         notifier.notify_owner(
             f"[order {result.order_id}] sent to production "
             f"({result.provider_order_id}).")
@@ -116,11 +131,14 @@ def process_orders(
     since=None,
     sleep: Callable[[float], None] = lambda _s: None,
     expected_currency: str | None = None,
+    alerts_seen: set | None = None,
+    notify_on_sent: bool = False,
 ) -> OrderBatchResult:
     """Poll the storefront for new orders and fulfill each one.
 
     In production this is the fallback path; the primary path is a webhook
     (orders/create) hitting the receiver, which calls handle_order directly.
+    Pass a long-lived `alerts_seen` set to dedupe advisories across batches.
     """
     from datetime import datetime, timezone
     since = since or datetime(2000, 1, 1, tzinfo=timezone.utc)
@@ -128,5 +146,6 @@ def process_orders(
     for order in store.fetch_orders_since(since):
         batch.results.append(
             handle_order(order, fulfiller=fulfiller, notifier=notifier,
-                         sleep=sleep, expected_currency=expected_currency))
+                         sleep=sleep, expected_currency=expected_currency,
+                         alerts_seen=alerts_seen))
     return batch

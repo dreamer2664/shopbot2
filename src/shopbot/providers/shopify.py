@@ -1,7 +1,17 @@
-"""Live Shopify storefront (Admin REST API, pinned version).
+"""Live Shopify storefront — GraphQL Admin API.
 
-Auth: custom-app Admin API access token (x-shopify-access-token header).
-Needed scopes: read_products, write_products, read_orders, read_fulfillments.
+WHY GraphQL, not REST: Shopify deprecated the entire REST Admin API
+(Oct 2024) and organizations created after April 1 2025 can only create
+custom apps with GraphQL. A brand-new store = brand-new org = GraphQL only.
+Source: shopify.dev changelog + community.shopify.com/c/technical-q-a/deprecating-rest-api
+
+Auth: custom-app Admin API access token (X-Shopify-Access-Token header).
+Scopes: read_products, write_products, read_orders, read_fulfillments.
+Endpoint: POST https://{domain}/admin/api/{version}/graphql.json
+
+Note: `orders/create` WEBHOOK payloads keep the classic REST-style JSON
+shape, so parse_shopify_order() below handles webhook bodies, while
+fetch_orders_since() maps GraphQL order nodes to the same Order model.
 """
 from __future__ import annotations
 
@@ -12,6 +22,38 @@ from .base import Address, Order, OrderLine, PermanentError, Product, Storefront
 from .http import api_request
 
 API_VERSION = "2025-01"
+
+PRODUCT_SET_MUTATION = """
+mutation productSet($input: ProductSetInput!) {
+  productSet(synchronous: true, input: $input) {
+    product { id title status }
+    userErrors { field message }
+  }
+}
+"""
+
+ORDERS_QUERY = """
+query unfulfilledOrders($q: String!) {
+  orders(query: $q, first: 100, sortKey: UPDATED_AT) {
+    nodes {
+      id name totalPrice currencyCode email phone
+      shippingAddress {
+        firstName lastName address1 city zip countryCode provinceCode phone
+      }
+      lineItems(first: 50) {
+        nodes { quantity product { id } variant { id } }
+      }
+    }
+  }
+}
+"""
+
+
+def _gid_id(gid: str | None) -> str:
+    """'gid://shopify/Order/123' -> '123' (None-safe)."""
+    if not gid:
+        return ""
+    return str(gid).rsplit("/", 1)[-1]
 
 
 @dataclass
@@ -28,60 +70,133 @@ class ShopifyStorefront(Storefront):
             raise PermanentError(f"bad Shopify domain: {self.domain!r}")
 
     @property
-    def _base(self) -> str:
-        return f"https://{self.domain}/admin/api/{API_VERSION}"
+    def _endpoint(self) -> str:
+        return f"https://{self.domain}/admin/api/{API_VERSION}/graphql.json"
 
     @property
     def _headers(self) -> dict:
         return {"X-Shopify-Access-Token": self.token,
                 "Content-Type": "application/json"}
 
+    def _gql(self, query: str, variables: dict, label: str) -> dict:
+        data = api_request(self.session, "POST", self._endpoint,
+                           headers=self._headers,
+                           json={"query": query, "variables": variables},
+                           label=label)
+        if not isinstance(data, dict):
+            raise PermanentError(f"{label}: unexpected response {data!r:.200}")
+        if data.get("errors"):
+            raise PermanentError(f"{label}: graphql errors {data['errors']!r:.300}")
+        return data.get("data") or {}
+
+    # ---- Storefront -------------------------------------------------------
+
     def upsert_product(self, product: Product) -> str:
-        """Create the storefront listing. If Printify's native Shopify sync is
-        enabled this is a no-op safety net: we verify the product exists and
-        return its id. Otherwise we create a simple listing ourselves."""
+        """Create/publish the listing via productSet (new product model).
+
+        If Printify's native Shopify sync already created the listing, this
+        acts as a safety net keyed on the store product id when known.
+        """
         if product.store_product_id:
             return product.store_product_id
-        variant = product.variants[0] if product.variants else None
-        payload = {"product": {
-            "title": product.design.title,
-            "body_html": f"<p>{product.design.description}</p>",
-            "vendor": "shopbot",
-            "product_type": "print-on-demand",
-            "tags": ", ".join(product.design.tags),
-            "status": "active" if product.published else "draft",
-            "variants": [{
-                "title": v.size or "Default",
+
+        # One option ("Title") listing every variant; images come from the
+        # design URL so the listing shows something even before Printify sync.
+        option_values = []
+        variants = []
+        seen = set()
+        for v in product.variants:
+            name = (v.size or v.color or "Default").strip() or "Default"
+            # productSet rejects duplicate option value names
+            base, i = name, 2
+            while name in seen:
+                name = f"{base} ({i})"
+                i += 1
+            seen.add(name)
+            option_values.append({"name": name})
+            variants.append({
+                "optionValues": [{"optionName": "Title", "name": name}],
                 "price": f"{(product.retail_price or 0):.2f}",
-                "sku": v.variant_id,
-                "inventory_management": None,   # supplier handles stock
-            } for v in product.variants] or [{"title": "Default",
-                                              "price": f"{(product.retail_price or 0):.2f}"}],
-        }}
-        data = api_request(self.session, "POST", f"{self._base}/products.json",
-                           headers=self._headers, json=payload,
-                           label="shopify.upsert_product")
-        if not isinstance(data, dict) or "product" not in data:
-            raise PermanentError(f"shopify.upsert_product: bad response {data!r:.200}")
-        product.store_product_id = str(data["product"]["id"])
+            })
+        if not option_values:
+            option_values = [{"name": "Default"}]
+            variants = [{"optionValues": [{"optionName": "Title",
+                                           "name": "Default"}],
+                         "price": f"{(product.retail_price or 0):.2f}"}]
+
+        input_payload = {
+            "title": product.design.title[:255],
+            "descriptionHtml": f"<p>{product.design.description}</p>",
+            "vendor": "shopbot",
+            "productType": "print-on-demand",
+            "tags": product.design.tags[:20],
+            "status": "ACTIVE" if product.published else "DRAFT",
+            "productOptions": [{"name": "Title", "values": option_values}],
+            "variants": variants,
+        }
+        if product.design.image_path.startswith("http"):
+            input_payload["files"] = [{
+                "originalSource": product.design.image_path,
+                "contentType": "MEDIA_IMAGE",
+            }]
+
+        data = self._gql(PRODUCT_SET_MUTATION, {"input": input_payload},
+                         "shopify.productSet")
+        result = data.get("productSet") or {}
+        user_errors = result.get("userErrors") or []
+        if user_errors:
+            raise PermanentError(f"shopify.productSet userErrors: {user_errors!r:.300}")
+        node = result.get("product") or {}
+        if not node.get("id"):
+            raise PermanentError(f"shopify.productSet: no product id {result!r:.200}")
+        product.store_product_id = _gid_id(node["id"])
         return product.store_product_id
 
     def fetch_orders_since(self, since: datetime) -> list[Order]:
         since = since.astimezone(timezone.utc)
-        url = (f"{self._base}/orders.json?status=any&fulfillment_status=unfulfilled"
-               f"&updated_at_min={since.strftime('%Y-%m-%dT%H:%M:%SZ')}&limit=250")
-        data = api_request(self.session, "GET", url, headers=self._headers,
-                           label="shopify.fetch_orders")
-        raw_orders = (data or {}).get("orders", []) if isinstance(data, dict) else []
-        return [parse_shopify_order(o) for o in raw_orders]
+        q = (f"updated_at:>='{since.strftime('%Y-%m-%dT%H:%M:%SZ')}' "
+             f"fulfillment_status:unfulfilled status:open")
+        data = self._gql(ORDERS_QUERY, {"q": q}, "shopify.orders")
+        nodes = (data.get("orders") or {}).get("nodes") or []
+        return [_graphql_order_to_model(n) for n in nodes]
+
+
+def _graphql_order_to_model(node: dict) -> Order:
+    sa = node.get("shippingAddress")
+    if not sa:
+        raise PermanentError(f"order {node.get('id')}: no shipping address")
+    lines = [
+        OrderLine(product_id=_gid_id((li.get("product") or {}).get("id")),
+                  variant_id=_gid_id((li.get("variant") or {}).get("id")),
+                  quantity=int(li.get("quantity") or 0))
+        for li in (node.get("lineItems") or {}).get("nodes", [])
+    ]
+    address = Address(
+        first_name=sa.get("firstName") or "",
+        last_name=sa.get("lastName") or "",
+        email=node.get("email") or "",
+        phone=sa.get("phone") or node.get("phone") or "",
+        address1=sa.get("address1") or "",
+        region=sa.get("provinceCode") or "",
+        city=sa.get("city") or "",
+        zip=sa.get("zip") or "",
+        country=(sa.get("countryCode") or "").upper(),
+    )
+    return Order(
+        order_id=_gid_id(node.get("id")),
+        lines=lines,
+        ship_to=address,
+        total=float(node.get("totalPrice") or 0),
+        currency=node.get("currencyCode") or "USD",
+    )
 
 
 def parse_shopify_order(raw: dict) -> Order:
-    """Map a Shopify order (REST or orders/create webhook payload) to our Order.
+    """Map a Shopify orders/create WEBHOOK payload (classic JSON shape).
 
     Webhook replays are normal, so order id is the idempotency key downstream.
     """
-    sa = raw.get("shipping_address") or raw.get("customer", {}).get("default_address") or {}
+    sa = raw.get("shipping_address") or (raw.get("customer") or {}).get("default_address") or {}
     if not sa:
         raise PermanentError(f"order {raw.get('id')}: no shipping address")
     lines = [

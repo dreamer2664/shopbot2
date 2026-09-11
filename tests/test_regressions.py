@@ -90,7 +90,32 @@ def test_bug4_currency_mismatch_alerts_but_still_fulfills():
     r = handle_order(_order(currency="EUR"), fulfiller=ful, notifier=note,
                      expected_currency="USD")
     assert r.status == "sent"     # customer already paid — fulfill regardless
-    assert any("currency mismatch" in m for m in note.owner_messages)
+    assert any("pricing" in m and "EUR" in m for m in note.owner_messages)
+
+
+def test_bug4b_currency_alert_dedupes_across_orders():
+    """Training-run lesson: 10k EUR orders must not produce 10k alerts."""
+    ful, note = MockFulfiller(), MockNotifier()
+    seen: set = set()
+    for i in range(100):
+        handle_order(_order(order_id=f"o{i}", currency="EUR"),
+                     fulfiller=ful, notifier=note,
+                     expected_currency="USD", alerts_seen=seen)
+    assert ful.submitted.keys().__len__() == 100
+    currency_alerts = [m for m in note.owner_messages if "pricing" in m]
+    assert len(currency_alerts) == 1     # told once, as promised in the message
+
+
+def test_bug4c_different_currency_pairs_alert_separately():
+    ful, note = MockFulfiller(), MockNotifier()
+    seen: set = set()
+    handle_order(_order(order_id="a", currency="EUR"), fulfiller=ful,
+                 notifier=note, expected_currency="USD", alerts_seen=seen)
+    handle_order(_order(order_id="b", currency="GBP"), fulfiller=ful,
+                 notifier=note, expected_currency="USD", alerts_seen=seen)
+    handle_order(_order(order_id="c", currency="EUR"), fulfiller=ful,
+                 notifier=note, expected_currency="USD", alerts_seen=seen)
+    assert len([m for m in note.owner_messages if "pricing" in m]) == 2
 
 
 def test_bug4_matching_currency_is_silent():

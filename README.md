@@ -74,28 +74,62 @@ secret copied into `SHOPIFY_WEBHOOK_SECRET`).
 
 ```
 shopbot/
-├── docs/RESEARCH.md              # platform rules, API tiers, architecture
+├── docs/RESEARCH.md              # platform rules, API tiers, market data + sources
+├── designs.example.csv           # input format for `cli launch`
 ├── src/shopbot/
 │   ├── config.py                 # env config + dry-run safety gate
-│   ├── cli.py                    # `demo` and `config` commands
+│   ├── cli.py                    # demo / config / launch / poll / report / serve
 │   ├── webhook.py                # Shopify orders/create receiver (HMAC verified)
+│   ├── knowledge/                # encoded business research (cited in-file)
+│   │   ├── __init__.py           #   category benchmarks, fee data, SEO limits
+│   │   └── copywriting.py        #   rule-based SEO listing copy + self-check
 │   ├── pipeline/
-│   │   ├── pricing.py            # cost + margin floor -> .99 retail price
-│   │   ├── products.py           # design -> supplier -> priced -> store -> socials
-│   │   ├── orders.py             # validate -> fulfill -> alert, idempotent
+│   │   ├── pricing.py            # v1 (multiplier) + v2 (fee-aware, market-checked)
+│   │   ├── products.py           # design -> copy -> supplier -> priced -> store -> socials
+│   │   ├── orders.py             # validate -> fulfill -> alert policy, idempotent
+│   │   ├── ledger.py             # crash-safe JSONL business memory
+│   │   ├── analytics.py          # ledger -> report -> benchmark-based alerts
+│   │   ├── state.py              # poll checkpoint (atomic writes)
 │   │   └── retry.py              # exponential backoff, transient-only
+│   ├── sim/                      # market simulator + year-long training run
+│   │   ├── market.py             #   elasticity + seasonality demand model
+│   │   └── training.py           #   stage1 pricing search, stage2 ops rehearsal
 │   └── providers/
 │       ├── base.py               # interfaces + data models + error taxonomy
 │       ├── mock.py               # offline providers with injectable failures
 │       ├── factory.py            # dry-run vs live wiring
 │       ├── http.py               # shared HTTP + status-code error mapping
 │       ├── printify.py           # supplier: products, pricing, orders
-│       ├── shopify.py            # storefront: listings, order fetch/parse
+│       ├── shopify.py            # storefront: GraphQL Admin API (REST is deprecated)
 │       ├── notifications.py      # Telegram (owner) + Resend (customer email)
 │       └── postiz.py             # social posting via self-hosted Postiz
-├── tests/                        # 46 offline tests
+├── tests/                        # 230 offline tests incl. chaos + regressions
 └── .env.example                  # credential template (never commit .env)
 ```
+
+## Training (simulated experience before going live)
+
+`PYTHONPATH=src python -m shopbot.sim.training` runs:
+
+1. **Pricing search** — grid-searches the profit-maximizing price per category
+   over a simulated year (elasticity + seasonality demand model grounded in
+   published benchmarks). Writes `data/pricing_playbook.json`.
+2. **Operations rehearsal** — pushes ~10k simulated orders through the REAL
+   pipeline with injected webhook replays, invalid addresses and supplier
+   outages; asserts the never-double-print / never-fulfill-invalid invariants;
+   finishes with an analytics report.
+
+Latest run: 10,183 orders, 10,180 sent, 279/279 replays absorbed, 5 outage
+days survived, 4 owner alerts (was 20,645 before the alert-fatigue fix),
+0 invariant violations.
+
+Lessons the training run taught the codebase (each now enforced by tests):
+- Alert fatigue is real: successful sales are silent, only problems page the
+  owner; recurring advisories dedupe per key.
+- Positional-argument field slips corrupt ledgers silently → Order validates
+  its own field types at construction.
+- Cheap items priced by margin alone land below what the market bears →
+  pricing snaps to the researched market floor.
 
 ## Remaining human-only steps
 

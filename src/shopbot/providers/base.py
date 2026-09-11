@@ -86,6 +86,24 @@ class Order:
     currency: str = "USD"
     received_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
+    def __post_init__(self):
+        # Field-slip guard: a positional mistake (e.g. passing currency where
+        # total belongs) must fail loudly HERE, not three modules downstream
+        # when analytics tries `revenue += "EUR"`.
+        if not isinstance(self.shipping_method, int):
+            raise TypeError(
+                f"Order.shipping_method must be int, got "
+                f"{type(self.shipping_method).__name__} ({self.shipping_method!r}) "
+                "— check positional argument order")
+        try:
+            self.total = float(self.total)
+        except (TypeError, ValueError):
+            raise TypeError(
+                f"Order.total must be numeric, got {self.total!r} "
+                "— check positional argument order")
+        if not isinstance(self.currency, str):
+            raise TypeError(f"Order.currency must be str, got {self.currency!r}")
+
 
 FulfillmentStatus = Literal["sent", "duplicate", "failed"]
 

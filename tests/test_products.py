@@ -13,8 +13,11 @@ def test_happy_path_full_sequence():
     p = MockProviders.build()
     res = _launch(p)
     assert res.success, res.error
-    assert res.steps_done == ["upload", "create_draft", "price",
+    assert res.steps_done == ["copy", "upload", "create_draft", "price",
                               "publish_supplier", "upsert_store", "social_post"]
+    # v2 pricing is fee-aware and market-checked by default
+    assert res.copy is not None and res.copy.warnings == []
+    assert res.pricing_warnings == []
     prod = res.product
     assert prod.printify_product_id in p.supplier.published
     assert prod.store_product_id in p.store.listings

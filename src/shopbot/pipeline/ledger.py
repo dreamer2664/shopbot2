@@ -69,14 +69,22 @@ class Ledger:
             os.fsync(f.fileno())
 
     def record_fulfillment(self, result: FulfillmentResult,
-                           order: Order | None = None) -> None:
+                           order: Order | None = None,
+                           cost: float | None = None,
+                           product_id: str | None = None) -> None:
+        """cost/product_id feed analytics (margin per product) — optional."""
+        detail = {}
+        if cost is not None:
+            detail["cost"] = cost
+        if product_id is not None:
+            detail["product_id"] = product_id
         self.append(LedgerEntry(
             ts=datetime.now(timezone.utc).isoformat(),
             kind="fulfillment", order_id=result.order_id, status=result.status,
             provider_order_id=result.provider_order_id,
             total=order.total if order else 0.0,
             currency=order.currency if order else "",
-            error=result.error))
+            error=result.error, detail=detail or None))
 
     def record_launch(self, design_slug: str, success: bool,
                       detail: dict | None = None, error: str | None = None) -> None:

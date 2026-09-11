@@ -106,7 +106,9 @@ def test_webhook_happy_path_fulfills(server):
     code, body = _post(port, SAMPLE_ORDER)
     assert code == 200 and body["status"] == "sent"
     assert "5512345678" in providers.fulfiller.submitted
-    assert any("sent to production" in m for m in providers.notifier.owner_messages)
+    # successful sales are silent by default (alert-fatigue policy);
+    # the daily `report` command is the owner's sales summary
+    assert providers.notifier.owner_messages == []
 
 
 def test_webhook_replay_is_duplicate_not_double_print(server):

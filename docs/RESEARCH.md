@@ -89,3 +89,23 @@ All components: free tiers, official APIs, Python + FastAPI (webhook receiver).
 - Occasional selling: fine as private individual. Regular commercial activity → partita IVA eventually (regime forfettario is the cheap entry path).
 - POD products we design ourselves: no IP issues. Never print branded/celebrity/fan-art designs — that's the #1 POD ban + lawsuit vector.
 - Distance-selling consumer rules: 14-day withdrawal right, must be stated in the shop.
+
+## 8. Market data encoded in `src/shopbot/knowledge/` (retrieved 2026-09-11)
+
+Sources (full URLs in knowledge/__init__.py):
+- [A] chayaani.com — POD net margins 20-40%; $25 tee nets ~$6.64; marketplace fees ~11-13% are the silent margin killer
+- [B] printify.com pricing guide — 40% margin is the 2026 benchmark; most sellers 30-50%; review pricing quarterly
+- [C] raccoontransfers.com — per-category cost/retail/margin table (tees 8-15/25-35, mugs 4-8/15-22, etc.); average seller ~20%, top performers 40-45%
+- [D] printify.com — category seasonality (apparel fall-winter, tees year-round)
+- [E] rewarx.com — SEO character limits: title 50-80 (keyword in first 30), meta title <=60, meta description 120-155, alt text 15-90
+- [F] charle.co.uk — product descriptions 300-500 words, first 100 words carry SEO weight
+
+### Shopify API status (verified 2026-09-11)
+REST Admin API deprecated since Oct 2024; orgs created after Apr 1 2025 can
+only create custom apps with GraphQL → our Shopify provider uses the GraphQL
+Admin API (productSet mutation + orders query). Webhook payloads (orders/create)
+keep the classic JSON shape, so the webhook parser is REST-style while the
+storefront client is GraphQL.
+
+These numbers are ASSUMPTIONS UNTIL REAL DATA ARRIVES: the analytics module
+compares live store performance against these benchmarks and alerts on drift.

@@ -5,11 +5,12 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from ..config import Config
+from ..knowledge.copywriting import ListingCopy, generate_copy
 from ..providers.base import (
     Design, PermanentError, Product, ProductProvider, SocialPoster,
     Storefront, TransientError,
 )
-from .pricing import price_variants
+from .pricing import price_variant_v2, price_variants
 from .retry import retry
 
 
@@ -21,6 +22,8 @@ class ProductLaunchResult:
     post_id: str | None = None
     error: str | None = None
     steps_done: list[str] = field(default_factory=list)
+    copy: ListingCopy | None = None
+    pricing_warnings: list[str] = field(default_factory=list)
 
 
 def build_social_copy(product: Product) -> tuple[str, list[str]]:
@@ -41,12 +44,18 @@ def launch_product(
     cfg: Config | None = None,
     sleep: Callable[[float], None] = lambda _s: None,
     social_networks: list[str] | None = None,
+    category: str = "tshirt",
+    use_v2_pricing: bool = True,
 ) -> ProductLaunchResult:
     """Run one design through the full launch flow.
 
     Order matters: nothing is published to the store before the supplier draft
     exists and is priced, and socials only fire after the listing is live —
     so we never advertise a product that can't be bought.
+
+    category: knowledge-base key (tshirt/mug/sticker/...) — drives benchmark
+    checks in v2 pricing and the SEO copy generator.
+    use_v2_pricing: fee-aware pricing with market-band checks (default).
     """
     cfg = cfg or Config.mock()
     result = ProductLaunchResult(design_slug=design.slug, success=False)
@@ -54,6 +63,9 @@ def launch_product(
                       print_provider_id=0)
 
     try:
+        result.copy = generate_copy(design, category)
+        result.steps_done.append("copy")
+
         upload_id = retry(lambda: supplier.upload_artwork(design), sleep=sleep)
         result.steps_done.append("upload")
 
@@ -63,7 +75,14 @@ def launch_product(
         product = retry(_create, sleep=sleep)
         result.steps_done.append("create_draft")
 
-        prices = price_variants(product, cfg.price_multiplier, cfg.min_margin)
+        if use_v2_pricing:
+            decisions = [price_variant_v2(v, category) for v in product.variants]
+            prices = {d.variant_id: d.price for d in decisions}
+            for d in decisions:
+                result.pricing_warnings.extend(
+                    f"{d.variant_id}: {w}" for w in d.warnings)
+        else:
+            prices = price_variants(product, cfg.price_multiplier, cfg.min_margin)
         supplier.set_prices(product, prices)
         result.steps_done.append("price")
         # One retail price per product for display/socials: the cheapest variant.

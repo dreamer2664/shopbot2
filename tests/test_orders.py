@@ -36,11 +36,27 @@ def test_validate_order_rules():
 def test_order_sent_to_production_and_owner_alerted():
     p = MockProviders.build()
     order = _live_order(p, qty=2)
-    r = handle_order(order, fulfiller=p.fulfiller, notifier=p.notifier)
+    r = handle_order(order, fulfiller=p.fulfiller, notifier=p.notifier,
+                     notify_on_sent=True)
     assert r.status == "sent"
     assert r.provider_order_id
     assert order.order_id in p.fulfiller.submitted
     assert any("sent to production" in m for m in p.notifier.owner_messages)
+
+
+def test_successful_sales_do_not_page_owner_by_default():
+    """Alert-fatigue lesson: 10k sales must not mean 10k Telegram pings.
+
+    Successful fulfillment is silent by default — the daily `report` covers it.
+    Only problems (rejections, exhausted retries, currency drift) notify.
+    """
+    p = MockProviders.build()
+    for i in range(25):
+        order = _live_order(p, order_id=f"sale_{i}")
+        handle_order(order, fulfiller=p.fulfiller, notifier=p.notifier,
+                     expected_currency="USD")
+    assert len(p.fulfiller.submitted) == 25
+    assert p.notifier.owner_messages == []
 
 
 def test_duplicate_webhook_replay_never_double_prints():

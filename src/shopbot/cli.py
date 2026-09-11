@@ -70,7 +70,7 @@ def demo() -> int:
 
         p.fulfiller.fail_times = 1  # transient supplier outage
         batch = process_orders(store=p.store, fulfiller=p.fulfiller,
-                               notifier=p.notifier)
+                               notifier=p.notifier, notify_on_sent=True)
         print(f"orders: sent={batch.sent} duplicates={batch.duplicates} "
               f"failed={batch.failed}")
 

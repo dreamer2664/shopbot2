@@ -40,6 +40,7 @@ def verify_shopify_hmac(body: bytes, header_value: str, secret: str) -> bool:
 class WebhookHandler(BaseHTTPRequestHandler):
     providers: Providers        # injected by serve()
     webhook_secret: str = ""    # empty = skip HMAC (dev only, warn loudly)
+    alerts_seen: set = set()    # dedupe recurring advisories across requests
 
     def do_POST(self):  # noqa: N802
         if self.path.rstrip("/") not in ("/webhooks/orders_create", ""):
@@ -81,7 +82,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         result = handle_order(order, fulfiller=self.providers.fulfiller,
                               notifier=self.providers.notifier,
-                              sleep=self.providers.sleep)
+                              sleep=self.providers.sleep,
+                              alerts_seen=self.alerts_seen)
         status = 200 if result.status in ("sent", "duplicate") else 500
         self._respond(status, {"status": result.status,
                                "provider_order_id": result.provider_order_id,
