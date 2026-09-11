@@ -1,4 +1,4 @@
-# Runtime (real providers, added next phase)
+# Runtime (live providers)
 requests>=2.31
 
 # Dev / test

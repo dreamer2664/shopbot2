@@ -36,16 +36,21 @@ A pipeline that automates a real online store end-to-end:
 
 ## Commands
 
+Works on Windows (PowerShell/cmd), macOS, Linux — no env vars, no install step:
+
 ```bash
 pip install -r requirements.txt
-python -m pytest                                # 187 tests, no network
-PYTHONPATH=src python -m shopbot.cli demo       # simulated business day (mocks)
-PYTHONPATH=src python -m shopbot.cli config     # live/dry-run + which creds present
-PYTHONPATH=src python -m shopbot.cli launch designs.example.csv
-PYTHONPATH=src python -m shopbot.cli poll       # one-shot order processing (cron-friendly)
-PYTHONPATH=src python -m shopbot.cli report     # revenue/order summary from ledger
-PYTHONPATH=src python -m shopbot.cli serve      # webhook receiver
+python -m pytest                          # 244 tests, no network
+python shopbot.py demo                    # simulated business day (mocks)
+python shopbot.py config                  # live/dry-run + which creds present
+python shopbot.py launch designs.example.csv
+python shopbot.py poll                    # one-shot order processing (cron-friendly)
+python shopbot.py report                  # revenue/order summary from ledger
+python shopbot.py serve                   # webhook receiver
 ```
+
+(PowerShell note: `PYTHONPATH=src python ...` is bash syntax; the
+`shopbot.py` launcher above makes it unnecessary.)
 
 Safety guarantee: `Config.from_env()` stays in **dry run** unless BOTH
 `PRINTIFY_API_TOKEN` and `SHOPIFY_ADMIN_TOKEN` are present. Dry run makes zero
