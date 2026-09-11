@@ -1,0 +1,5 @@
+# Runtime (real providers, added next phase)
+requests>=2.31
+
+# Dev / test
+pytest>=8.0

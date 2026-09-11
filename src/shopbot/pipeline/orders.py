@@ -1,0 +1,111 @@
+"""Order handling: webhook/poll intake -> validation -> fulfillment -> alerts."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Callable
+
+from ..providers.base import (
+    Fulfiller, FulfillmentResult, Notifier, Order, PermanentError,
+    Storefront, TransientError,
+)
+from .retry import retry
+
+
+@dataclass
+class OrderBatchResult:
+    results: list[FulfillmentResult] = field(default_factory=list)
+
+    @property
+    def sent(self) -> int:
+        return sum(1 for r in self.results if r.status == "sent")
+
+    @property
+    def duplicates(self) -> int:
+        return sum(1 for r in self.results if r.status == "duplicate")
+
+    @property
+    def failed(self) -> int:
+        return sum(1 for r in self.results if r.status == "failed")
+
+
+def validate_order(order: Order) -> str | None:
+    """Returns an error string if the order is not fulfillable, else None."""
+    if not order.order_id:
+        return "missing order_id"
+    if not order.lines:
+        return "no line items"
+    if any(ln.quantity <= 0 for ln in order.lines):
+        return "non-positive quantity"
+    a = order.ship_to
+    for name, value in [("country", a.country), ("zip", a.zip),
+                        ("address1", a.address1), ("city", a.city)]:
+        if not (value or "").strip():
+            return f"ship_to.{name} missing"
+    if len(a.country) != 2:
+        return "ship_to.country must be ISO-3166 alpha-2"
+    return None
+
+
+def handle_order(
+    order: Order,
+    *,
+    fulfiller: Fulfiller,
+    notifier: Notifier | None = None,
+    sleep: Callable[[float], None] = lambda _s: None,
+    attempts: int = 3,
+) -> FulfillmentResult:
+    """Fulfill a single order with retries, idempotency and owner alerts.
+
+    Idempotency: the fulfiller keys on order.order_id, so replaying the same
+    webhook twice (which platforms do routinely) can never double-print.
+    """
+    error = validate_order(order)
+    if error:
+        if notifier:
+            notifier.notify_owner(f"[order {order.order_id or '?'}] rejected: {error}")
+        return FulfillmentResult(order.order_id, "failed", error=error)
+
+    try:
+        result = retry(lambda: fulfiller.submit(order), attempts=attempts,
+                       sleep=sleep)
+    except TransientError as exc:
+        if notifier:
+            notifier.notify_owner(
+                f"[order {order.order_id}] fulfillment FAILED after {attempts} "
+                f"attempts: {exc}. Manual action needed in Printify dashboard.")
+        return FulfillmentResult(order.order_id, "failed", error=str(exc),
+                                 attempts=attempts)
+    except PermanentError as exc:
+        if notifier:
+            notifier.notify_owner(
+                f"[order {order.order_id}] rejected by supplier: {exc}")
+        return FulfillmentResult(order.order_id, "failed", error=str(exc))
+
+    if notifier and result.status == "sent":
+        notifier.notify_owner(
+            f"[order {result.order_id}] sent to production "
+            f"({result.provider_order_id}).")
+    return result
+
+
+def process_orders(
+    *,
+    store: Storefront,
+    fulfiller: Fulfiller,
+    notifier: Notifier | None = None,
+    since=None,
+    sleep: Callable[[float], None] = lambda _s: None,
+) -> OrderBatchResult:
+    """Poll the storefront for new orders and fulfill each one.
+
+    In production this is the fallback path; the primary path is a webhook
+    (orders/create) hitting the receiver, which calls handle_order directly.
+    """
+    from datetime import datetime, timezone
+    since = since or datetime(2000, 1, 1, tzinfo=timezone.utc)
+    batch = OrderBatchResult()
+    for order in store.fetch_orders_since(since):
+        batch.results.append(
+            handle_order(order, fulfiller=fulfiller, notifier=notifier,
+                         sleep=sleep))
+    return batch

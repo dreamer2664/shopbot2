@@ -20,10 +20,35 @@ A pipeline that automates a real online store end-to-end:
 
 ## Status
 
-- [x] Research: platform rules, free API tiers (see `docs/RESEARCH.md`)
-- [ ] Direction confirmed (POD store vs eBay reselling vs sandbox)
-- [ ] Repo pushed to GitHub (owner creates empty repo; push via `gh` or SSH)
-- [ ] Core pipeline implementation
+- [x] Research: platform rules, free API tiers (`docs/RESEARCH.md`)
+- [x] Direction: print-on-demand (Printify) + Shopify storefront
+- [x] Core pipeline: pricing, product launch, order fulfillment — mock providers
+- [x] Test suite: 20 tests, offline, no network (`python -m pytest`)
+- [ ] Real provider implementations (Printify, Shopify, Telegram, Postiz, Resend)
+- [ ] Webhook receiver (FastAPI) for `orders/create`
+- [ ] Repo pushed to GitHub
+- [ ] End-to-end validation against a real Shopify dev store
+
+## Try it now
+
+```bash
+pip install -r requirements.txt
+python -m pytest                          # 20 tests, all offline
+PYTHONPATH=src python -m shopbot.cli demo    # full business loop, mock providers
+PYTHONPATH=src python -m shopbot.cli config  # show live/dry-run mode
+```
+
+`Config.from_env()` stays in **dry run** unless both `PRINTIFY_API_TOKEN` and
+`SHOPIFY_ADMIN_TOKEN` are present. Dry run makes zero network calls, so the
+whole pipeline can be exercised as many times as needed before going live.
+
+## Test coverage
+
+| Area | What's asserted |
+|---|---|
+| Pricing | .99 rounding, multiplier vs margin floor, never prices below cost+margin |
+| Product launch | Correct step ordering; socials never fire if listing failed; retries absorb transient outages; nothing half-published when retries exhaust |
+| Orders | Address/quantity validation; **duplicate webhook replay never double-prints**; transient retry then success; persistent outage escalates to owner; permanent rejection is not retried |
 
 ## Structure
 
